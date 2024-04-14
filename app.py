@@ -4,7 +4,7 @@ import random
 import json
 import pymysql.cursors
 from openai import OpenAI
-from test_gpt import openai_chat
+from test_gpt import openai_chat, win_or_lose
 from apscheduler.schedulers.background import BackgroundScheduler
 import pymysql
 import datetime
@@ -76,6 +76,7 @@ def handle_guess():
     data = request.json
     guess = data.get('guess')
     story_id = data.get('story_id')
+    surface_prompt = data.get('surfacePrompt')
     user_id = data.get('user_id')
 
     connection = pymysql.connect(**db_config)
@@ -85,23 +86,30 @@ def handle_guess():
             # Fetch the story's truth for validation
             cursor.execute("SELECT truth FROM stories WHERE id = %s", (story_id,))
             story = cursor.fetchone()
+            print(story['truth'])
 
         if story:
             # Logic to determine if the guess is correct
-            # button onclick --> guess
-                # three attempts --> if failed first two, go back to game session
-            is_correct = guess.lower().strip() == story['truth'].lower().strip()
-            success = int(is_correct)
+            result = win_or_lose(guess, story['truth'], surface_prompt)
 
+            if result == "Correct" or result == "Incorrect":
+                return jsonify({"is_correct": result})
+            else:
+                return jsonify({"is_correct": "Unexpected response. Prompt failed"})
+
+            """"
             # Update the user_story_attempts table with the result of the guess
             with connection.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(
                     INSERT INTO user_story_attempts (user_id, story_id, question_attempts, success) 
                     VALUES (%s, %s, 1, %s) 
                     ON DUPLICATE KEY UPDATE 
                         question_attempts = question_attempts + 1, success = VALUES(success)
-                """, (user_id, story_id, success))
+                , (user_id, story_id, success))
                 connection.commit()
+
+            
+            """
         else:
             return jsonify({"error": "Story not found"}), 404
     except pymysql.MySQLError as e:
@@ -109,7 +117,7 @@ def handle_guess():
     finally:
         connection.close()
 
-    return jsonify({"is_correct": success})
+    return jsonify({"is_correct": result})
 
 @app.route('/api/question', methods=['POST'])
 def receive_question():
